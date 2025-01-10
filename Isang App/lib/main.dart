@@ -63,8 +63,10 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   TextEditingController taskTitleController = TextEditingController();
+  TextEditingController goalController = TextEditingController();
   String goal = "";
   final List<Todo> _todoList = [];
+  final List<String> _goals = [];
   final FlutterLocalNotificationsPlugin _notificationsPlugin =
   FlutterLocalNotificationsPlugin();
   String animatedText = "";
@@ -121,28 +123,33 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> _loadDataFromDB() async {
     final prefs = await SharedPreferences.getInstance();
     final todoData = prefs.getString('todoList');
-    final savedGoal = prefs.getString('goal') ?? "";
+    final goalData = prefs.getStringList('goals') ?? [];
+    setState(() {
+      _goals.clear();
+      _goals.addAll(goalData);
+    });
     if (todoData != null) {
       final List<dynamic> jsonData = jsonDecode(todoData);
       setState(() {
         _todoList.clear();
         _todoList.addAll(jsonData.map((item) => Todo.fromJson(item)).toList());
-        goal = savedGoal;
       });
     }
   }
 
   Future<void> _saveDataToDB() async {
     final prefs = await SharedPreferences.getInstance();
-    final todoData = jsonEncode(_todoList.map((todo) => todo.toJson()).toList());
+    final todoData =
+    jsonEncode(_todoList.map((todo) => todo.toJson()).toList());
     await prefs.setString('todoList', todoData);
-    await prefs.setString('goal', goal);
+    await prefs.setStringList('goals', _goals);
   }
 
   void _startCurrentTimeUpdate() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
-        currentTime = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
+        currentTime =
+            DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
       });
     });
   }
@@ -186,7 +193,7 @@ class _MyHomePageState extends State<MyHomePage> {
     await _notificationsPlugin.show(0, title, body, platformDetails);
   }
 
-  void _removeTodo(int index) {
+  void _removeTodoAt(int index) {
     setState(() {
       _todoList.removeAt(index);
       _saveDataToDB();
@@ -207,133 +214,39 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  void _startInputTypingAnimation(String message) {
-    int index = 0;
-    Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      if (index < message.length) {
-        setState(() {
-          inputAnimatedText += message[index];
-        });
-        index++;
-      } else {
-        timer.cancel();
-      }
-    });
-  }
-
-  List<String> _getPriorityList() {
-    List<Todo> sortedList = _sortTodosByPriority();
-    return sortedList.map((todo) => todo.title).toList();
-  }
-
-  List<Todo> _sortTodosByPriority() {
-    List<Todo> sortedList = List.from(_todoList);
-    sortedList.sort((a, b) {
-      if (a.title.contains(goal) && !b.title.contains(goal)) {
-        return -1;
-      } else if (!a.title.contains(goal) && b.title.contains(goal)) {
-        return 1;
-      } else {
-        return a.time.compareTo(b.time);
-      }
-    });
-    return sortedList;
-  }
-
-  String _formatRemainingTime(DateTime time) {
-    final now = DateTime.now();
-    final difference = time.difference(now);
-    if (difference.isNegative) {
-      return "기한이 지났습니다";
-    } else {
-      return "${difference.inDays}일 ${difference.inHours % 24}시간 ${difference.inMinutes % 60}분 ${difference.inSeconds % 60}초 남음";
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    List<String> priorityList = _getPriorityList();
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Row(
-              children: priorityList
-                  .map((title) => Row(
-                children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const Icon(Icons.chevron_right),
-                ],
-              ))
-                  .toList(),
+  void _showAddGoalDialog() {
+    goalController.clear();
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('목표 추가하기'),
+          content: TextField(
+            controller: goalController,
+            decoration: const InputDecoration(
+              hintText: '목표 내용 입력',
             ),
-            const SizedBox(height: 16),
-            Text(
-              currentTime,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              onChanged: (value) {
-                setState(() {
-                  goal = value;
-                });
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
               },
-              decoration: const InputDecoration(
-                labelText: '목표 입력 (우선순위 정렬)',
-              ),
+              child: const Text('취소'),
             ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: _todoList.isEmpty
-                  ? const Center(
-                child: Text(
-                  '추가된 할일이 없습니다.',
-                  style: TextStyle(fontSize: 18),
-                ),
-              )
-                  : ListView.builder(
-                itemCount: _sortTodosByPriority().length,
-                itemBuilder: (context, index) {
-                  final todo = _sortTodosByPriority()[index];
-                  return ListTile(
-                    leading: Checkbox(
-                      value: todo.completed,
-                      onChanged: (value) {
-                        setState(() {
-                          todo.completed = value ?? false;
-                          if (todo.completed) {
-                            _removeTodo(index);
-                          }
-                        });
-                      },
-                    ),
-                    title: Text(todo.title,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold)),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(DateFormat('yyyy-MM-dd HH:mm:ss')
-                            .format(todo.time)),
-                        Text(_formatRemainingTime(todo.time)),
-                      ],
-                    ),
-                  );
-                },
-              ),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _goals.add(goalController.text);
+                  _saveDataToDB();
+                });
+                Navigator.of(context).pop();
+              },
+              child: const Text('추가'),
             ),
           ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddTodoDialog,
-        child: const Icon(Icons.add),
-      ),
+        );
+      },
     );
   }
 
@@ -406,6 +319,219 @@ class _MyHomePageState extends State<MyHomePage> {
           ],
         );
       },
+    );
+  }
+
+  void _showAddOptionDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('추가 옵션'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _showAddGoalDialog();
+                },
+                child: const Text('목표 추가하기'),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _showAddTodoDialog();
+                },
+                child: const Text('할일 추가하기'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  List<String> _getPriorityList() {
+    List<Todo> sortedList = _sortTodosByPriority();
+    return sortedList.map((todo) => todo.title).toList();
+  }
+
+  List<Todo> _sortTodosByPriority() {
+    List<Todo> sortedList = List.from(_todoList);
+    sortedList.sort((a, b) {
+      if (a.title.contains(goal) && !b.title.contains(goal)) {
+        return -1;
+      } else if (!a.title.contains(goal) && b.title.contains(goal)) {
+        return 1;
+      } else {
+        return a.time.compareTo(b.time);
+      }
+    });
+    return sortedList;
+  }
+
+  String _formatRemainingTime(DateTime time) {
+    final now = DateTime.now();
+    final difference = time.difference(now);
+    if (difference.isNegative) {
+      return "기한이 지났습니다";
+    } else {
+      return "${difference.inDays}일 ${difference.inHours % 24}시간 ${difference.inMinutes % 60}분 ${difference.inSeconds % 60}초 남음";
+    }
+  }
+
+  void _startInputTypingAnimation(String message) {
+    int index = 0;
+    inputAnimatedText = ""; // Reset the animated text
+    Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (index < message.length) {
+        setState(() {
+          inputAnimatedText += message[index];
+        });
+        index++;
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    List<String> priorityList = _getPriorityList();
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48.0),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _goals
+                  .asMap()
+                  .entries
+                  .map((entry) {
+                int index = entry.key;
+                String goalItem = entry.value;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Checkbox(
+                        value: false,
+                        onChanged: (value) {
+                          if (value == true) {
+                            setState(() {
+                              _goals.removeAt(index);
+                              _saveDataToDB();
+                            });
+                          }
+                        },
+                      ),
+                      ActionChip(
+                        label: Text(goalItem),
+                        onPressed: () {
+                          setState(() {
+                            goal = goalItem;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              })
+                  .toList(),
+            ),
+          ),
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Row(
+              children: priorityList
+                  .map((title) => Row(
+                children: [
+                  Text(title,
+                      style:
+                      const TextStyle(fontWeight: FontWeight.bold)),
+                  const Icon(Icons.chevron_right),
+                ],
+              ))
+                  .toList(),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              currentTime,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              onChanged: (value) {
+                setState(() {
+                  goal = value;
+                });
+              },
+              decoration: const InputDecoration(
+                labelText: '목표 입력 (우선순위 정렬)',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: _todoList.isEmpty
+                  ? const Center(
+                child: Text(
+                  '추가된 할일이 없습니다.',
+                  style: TextStyle(fontSize: 18),
+                ),
+              )
+                  : ListView.builder(
+                itemCount: _sortTodosByPriority().length,
+                itemBuilder: (context, index) {
+                  final todo = _sortTodosByPriority()[index];
+                  return ListTile(
+                    leading: Checkbox(
+                      value: todo.completed,
+                      onChanged: (value) {
+                        setState(() {
+                          todo.completed = value ?? false;
+                          if (todo.completed) {
+                            _removeTodoAt(index);
+                          }
+                        });
+                      },
+                    ),
+                    title: Text(todo.title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold)),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(DateFormat('yyyy-MM-dd HH:mm:ss')
+                            .format(todo.time)),
+                        Text(_formatRemainingTime(todo.time)),
+                      ],
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        _removeTodoAt(index);
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showAddOptionDialog,
+        child: const Icon(Icons.add),
+      ),
     );
   }
 
