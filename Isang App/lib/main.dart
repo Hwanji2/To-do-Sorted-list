@@ -1,429 +1,366 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_chatgpt_app/model/open_ai_model.dart';
-import 'package:http/http.dart' as http;
-import 'package:rxdart/rxdart.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:intl/intl.dart';
+import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: '할일 관리 앱',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: const [
+        Locale('ko'),
+        Locale('en'),
+      ],
+      home: const MyHomePage(title: '할일 관리 앱'),
     );
   }
 }
 
+class Todo {
+  String title;
+  DateTime time;
+  bool completed;
+  Todo({required this.title, required this.time, this.completed = false});
+
+  Map<String, dynamic> toJson() => {
+    'title': title,
+    'time': time.toIso8601String(),
+    'completed': completed,
+  };
+
+  factory Todo.fromJson(Map<String, dynamic> json) => Todo(
+    title: json['title'],
+    time: DateTime.parse(json['time']),
+    completed: json['completed'],
+  );
+}
+
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
-
   final String title;
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
-  TextEditingController messageTextController = TextEditingController();
-  final List<Messages> _historyList = List.empty(growable: true);
+class _MyHomePageState extends State<MyHomePage> {
+  TextEditingController taskTitleController = TextEditingController();
+  String goal = "";
+  final List<Todo> _todoList = [];
+  final FlutterLocalNotificationsPlugin _notificationsPlugin =
+  FlutterLocalNotificationsPlugin();
+  String animatedText = "";
+  String inputAnimatedText = "";
+  String currentTime = "";
+  late Timer _timer;
 
-  String apiKey = "<YOUR-API-KEY>";
-  String streamText = "";
-
-  static const String _kStrings = "FastCampus Flutter ChatGPT";
-
-  String get _currentString => _kStrings;
-
-  ScrollController scrollController = ScrollController();
-  late Animation<int> _characterCount;
-  late AnimationController animationController;
-
-  void _scrollDown() {
-    scrollController.animateTo(
-      scrollController.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 350),
-      curve: Curves.fastOutSlowIn,
-    );
+  @override
+  void initState() {
+    super.initState();
+    _initializeNotifications();
+    _startTypingAnimation("할일 관리 앱에 오신 것을 환영합니다!");
+    _startCurrentTimeUpdate();
+    _startDeadlineCheck();
+    _loadDataFromDB();
   }
 
-  setupAnimations() {
-    animationController = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 2500));
-    _characterCount = StepTween(begin: 0, end: _currentString.length).animate(
-      CurvedAnimation(
-        parent: animationController,
-        curve: Curves.easeIn,
-      ),
-    );
-    animationController.addListener(() {
-      setState(() {});
-    });
-    animationController.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        Future.delayed(const Duration(seconds: 1)).then((value) {
-          animationController.reverse();
-        });
-      } else if (status == AnimationStatus.dismissed) {
-        Future.delayed(const Duration(seconds: 1)).then(
-          (value) => animationController.forward(),
-        );
-      }
-    });
-
-    animationController.forward();
+  void _initializeNotifications() {
+    tz_data.initializeTimeZones();
+    const AndroidInitializationSettings androidSettings =
+    AndroidInitializationSettings('@mipmap/ic_launcher');
+    const InitializationSettings initSettings =
+    InitializationSettings(android: androidSettings);
+    _notificationsPlugin.initialize(initSettings);
   }
 
-  Future requestChat(String text) async {
-    ChatCompletionModel openAiModel = ChatCompletionModel(
-      model: "gpt-3.5-turbo-0613",
-      messages: [
-        Messages(
-          role: "system",
-          content: "You are a helpful assistant.",
-        ),
-        ..._historyList,
-      ],
-      stream: false,
-    );
-    final url = Uri.https("api.openai.com", "/v1/chat/completions");
-    final resp = await http.post(url,
-        headers: {
-          "Authorization": "Bearer $apiKey",
-          "Content-Type": "application/json",
-        },
-        body: jsonEncode(openAiModel.toJson()));
-    print(resp.body);
-    if (resp.statusCode == 200) {
-      final jsonData = jsonDecode(utf8.decode(resp.bodyBytes)) as Map;
-      String role = jsonData["choices"][0]["message"]["role"];
-      String content = jsonData["choices"][0]["message"]["content"];
-      _historyList.last = _historyList.last.copyWith(
-        role: role,
-        content: content,
-      );
+  Future<void> _loadDataFromDB() async {
+    final prefs = await SharedPreferences.getInstance();
+    final todoData = prefs.getString('todoList');
+    final savedGoal = prefs.getString('goal') ?? "";
+    if (todoData != null) {
+      final List<dynamic> jsonData = jsonDecode(todoData);
       setState(() {
-        _scrollDown();
+        _todoList.clear();
+        _todoList.addAll(jsonData.map((item) => Todo.fromJson(item)).toList());
+        goal = savedGoal;
       });
     }
   }
 
-  Stream requestChatStream(String text) async* {
-    ChatCompletionModel openAiModel = ChatCompletionModel(
-        model: "gpt-3.5-turbo-0613",
-        messages: [
-          Messages(
-            role: "system",
-            content: "You are a helpful assistant.",
-          ),
-          ..._historyList,
-        ],
-        stream: true);
+  Future<void> _saveDataToDB() async {
+    final prefs = await SharedPreferences.getInstance();
+    final todoData = jsonEncode(_todoList.map((todo) => todo.toJson()).toList());
+    await prefs.setString('todoList', todoData);
+    await prefs.setString('goal', goal);
+  }
 
-    final url = Uri.https("api.openai.com", "/v1/chat/completions");
-    final request = http.Request("POST", url)
-      ..headers.addAll(
-        {
-          "Authorization": "Bearer $apiKey",
-          "Content-Type": 'application/json; charset=UTF-8',
-          "Connection": "keep-alive",
-          "Accept": "*/*",
-          "Accept-Encoding": "gzip, deflate, br",
-        },
-      );
-    request.body = jsonEncode(openAiModel.toJson());
+  void _startCurrentTimeUpdate() {
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        currentTime = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
+      });
+    });
+  }
 
-    final resp = await http.Client().send(request);
-
-    final byteStream = resp.stream.asyncExpand(
-      (event) => Rx.timer(
-        event,
-        const Duration(milliseconds: 50),
-      ),
-    );
-    final statusCode = resp.statusCode;
-
-    var respText = "";
-
-    await for (final byte in byteStream) {
-      try {
-        var decoded = utf8.decode(byte, allowMalformed: false);
-        if (decoded.contains('"content":')) {
-          final strings = decoded.split("data: ");
-          for (final string in strings) {
-            final trimmedString = string.trim();
-            if (trimmedString.isNotEmpty && !trimmedString.endsWith("[DONE]")) {
-              final map = jsonDecode(trimmedString) as Map;
-              final choices = map["choices"] as List;
-              final delta = choices[0]["delta"] as Map;
-              if (delta["content"] != null) {
-                final content = delta["content"] as String;
-                respText += content;
-                setState(() {
-                  streamText = respText;
-                });
-                yield content;
-              }
-            }
+  void _startDeadlineCheck() {
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      final now = DateTime.now();
+      for (var todo in _todoList) {
+        if (!todo.completed) {
+          final remaining = todo.time.difference(now);
+          if (remaining.inSeconds == 30) {
+            _showNotification("기한 30초 전!", "${todo.title}: ${_formatRemainingTime(todo.time)} 남음");
+          } else if (remaining.isNegative) {
+            _showNotification("기한 만료!", "${todo.title}: 기한이 지났습니다");
           }
         }
-      } catch (e) {
-        print(e.toString());
       }
-    }
-
-    if (respText.isNotEmpty) {
-      setState(() {});
-    }
+    });
   }
 
-  @override
-  void initState() {
-    // TODO: implement initState
-    super.initState();
-    setupAnimations();
+  void _showNotification(String title, String body) async {
+    var androidDetails = const AndroidNotificationDetails(
+      'deadline_channel',
+      '기한 알림',
+      importance: Importance.max,
+      priority: Priority.high,
+    );
+    var platformDetails = NotificationDetails(android: androidDetails);
+    await _notificationsPlugin.show(0, title, body, platformDetails);
   }
 
-  @override
-  void dispose() {
-    messageTextController.dispose();
-    scrollController.dispose();
-    super.dispose();
+  void _startTypingAnimation(String message) {
+    int index = 0;
+    Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (index < message.length) {
+        setState(() {
+          animatedText += message[index];
+        });
+        index++;
+      } else {
+        timer.cancel();
+      }
+    });
   }
 
-  Future clearChat() async {
+  void _showAddTodoDialog() {
+    taskTitleController.clear();
+    inputAnimatedText = "";
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("새로운 대화의 시작"),
-        content: const Text("신규 대화를 생성하시겠어요?"),
-        actions: [
-          TextButton(
+      builder: (context) {
+        _startInputTypingAnimation("할일 제목과 시간을 입력하세요");
+        return AlertDialog(
+          title: Text(animatedText),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(inputAnimatedText),
+              TextField(
+                controller: taskTitleController,
+                decoration: const InputDecoration(
+                  hintText: '할일 제목 입력',
+                ),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () async {
+                  DateTime? selectedDate = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                    locale: const Locale("ko"),
+                  );
+
+                  if (selectedDate == null) return;
+
+                  TimeOfDay? selectedTime = await showTimePicker(
+                    context: context,
+                    initialTime: TimeOfDay.now(),
+                  );
+
+                  if (selectedTime == null) return;
+
+                  final DateTime dateTime = DateTime(
+                    selectedDate.year,
+                    selectedDate.month,
+                    selectedDate.day,
+                    selectedTime.hour,
+                    selectedTime.minute,
+                  );
+
+                  final newTodo = Todo(
+                      title: taskTitleController.text, time: dateTime);
+                  setState(() {
+                    _todoList.add(newTodo);
+                    _saveDataToDB();
+                  });
+                  Navigator.of(context).pop();
+                },
+                child: const Text('날짜와 시간 선택'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                setState(() {
-                  messageTextController.clear();
-                  _historyList.clear();
-                });
               },
-              child: const Text("네"))
-        ],
-      ),
+              child: const Text('취소'),
+            ),
+          ],
+        );
+      },
     );
+  }
+
+  void _startInputTypingAnimation(String message) {
+    int index = 0;
+    Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (index < message.length) {
+        setState(() {
+          inputAnimatedText += message[index];
+        });
+        index++;
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _removeTodo(int index) {
+    setState(() {
+      _todoList.removeAt(index);
+      _saveDataToDB();
+    });
+  }
+
+  List<Todo> _sortTodosByPriority() {
+    List<Todo> sortedList = List.from(_todoList);
+    sortedList.sort((a, b) {
+      if (a.title.contains(goal) && !b.title.contains(goal)) {
+        return -1;
+      } else if (!a.title.contains(goal) && b.title.contains(goal)) {
+        return 1;
+      } else {
+        return a.time.compareTo(b.time);
+      }
+    });
+    return sortedList;
+  }
+
+  String _formatRemainingTime(DateTime time) {
+    final now = DateTime.now();
+    final difference = time.difference(now);
+    if (difference.isNegative) {
+      return "기한이 지났습니다";
+    } else {
+      return "${difference.inDays}일 ${difference.inHours % 24}시간 ${difference.inMinutes % 60}분 ${difference.inSeconds % 60}초 남음";
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              Align(
-                alignment: Alignment.centerRight,
-                child: Card(
-                  child: PopupMenuButton(
-                    itemBuilder: (context) {
-                      return [
-                        const PopupMenuItem(
-                          child: ListTile(
-                            title: Text("히스토리"),
-                          ),
-                        ),
-                        const PopupMenuItem(
-                          child: ListTile(
-                            title: Text("설정"),
-                          ),
-                        ),
-                        PopupMenuItem(
-                          onTap: () {
-                            clearChat();
-                          },
-                          child: const ListTile(
-                            title: Text("새로운 채팅"),
-                          ),
-                        )
-                      ];
-                    },
-                  ),
-                ),
+      appBar: AppBar(
+        title: Text(widget.title),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Text(
+              currentTime,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              animatedText,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              onChanged: (value) {
+                setState(() {
+                  goal = value;
+                });
+              },
+              decoration: const InputDecoration(
+                labelText: '목표 입력 (우선순위 정렬)',
               ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  child: _historyList.isEmpty
-                      ? Center(
-                          child: AnimatedBuilder(
-                            animation: _characterCount,
-                            builder: (BuildContext context, Widget? child) {
-                              String text = _currentString.substring(
-                                  0, _characterCount.value);
-                              return Row(
-                                children: [
-                                  Text(
-                                    "$text",
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 24,
-                                    ),
-                                  ),
-                                  CircleAvatar(
-                                    radius: 8,
-                                    backgroundColor: Colors.orange[200],
-                                  )
-                                ],
-                              );
-                            },
-                          ),
-                        )
-                      : GestureDetector(
-                          onTap: () => FocusScope.of(context).unfocus(),
-                          child: ListView.builder(
-                            controller: scrollController,
-                            itemCount: _historyList.length,
-                            itemBuilder: (context, index) {
-                              if (_historyList[index].role == "user") {
-                                return Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 16),
-                                  child: Row(
-                                    children: [
-                                      const CircleAvatar(),
-                                      const SizedBox(
-                                        width: 8,
-                                      ),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            const Text("User"),
-                                            Text(_historyList[index].content),
-                                          ],
-                                        ),
-                                      )
-                                    ],
-                                  ),
-                                );
-                              }
-                              return Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const CircleAvatar(
-                                    backgroundColor: Colors.teal,
-                                  ),
-                                  const SizedBox(
-                                    width: 8,
-                                  ),
-                                  Expanded(
-                                      child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text("ChatGPT"),
-                                      Text(_historyList[index].content)
-                                    ],
-                                  ))
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                ),
-              ),
-              Dismissible(
-                key: const Key("chat-bar"),
-                direction: DismissDirection.startToEnd,
-                onDismissed: (d) {
-                  if (d == DismissDirection.startToEnd) {
-                    // logic
-                  }
-                },
-                background: const Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Text("New Chat"),
-                  ],
-                ),
-                confirmDismiss: (d) async {
-                  if (d == DismissDirection.startToEnd) {
-                    //logic
-                    if (_historyList.isEmpty) return;
-                    clearChat();
-                  }
-                },
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(32),
-                          border: Border.all(),
-                        ),
-                        child: TextField(
-                          controller: messageTextController,
-                          decoration: const InputDecoration(
-                              border: InputBorder.none, hintText: "Message"),
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      iconSize: 42,
-                      onPressed: () async {
-                        if (messageTextController.text.isEmpty) {
-                          return;
-                        }
-                        setState(() {
-                          _historyList.add(
-                            Messages(
-                                role: "user",
-                                content: messageTextController.text.trim()),
-                          );
-                          _historyList
-                              .add(Messages(role: "assistant", content: ""));
-                        });
-                        try {
-                          var text = "";
-                          final stream = requestChatStream(
-                              messageTextController.text.trim());
-                          await for (final textChunk in stream) {
-                            text += textChunk;
-                            setState(() {
-                              _historyList.last =
-                                  _historyList.last.copyWith(content: text);
-                              _scrollDown();
-                            });
-                          }
-                          // await requestChat(messageTextController.text.trim());
-                          messageTextController.clear();
-                          streamText = "";
-                        } catch (e) {
-                          print(e.toString());
-                        }
-                      },
-                      icon: const Icon(Icons.arrow_circle_up),
-                    )
-                  ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: _todoList.isEmpty
+                  ? const Center(
+                child: Text(
+                  '추가된 할일이 없습니다.',
+                  style: TextStyle(fontSize: 18),
                 ),
               )
-            ],
-          ),
+                  : ListView.builder(
+                itemCount: _sortTodosByPriority().length,
+                itemBuilder: (context, index) {
+                  final todo = _sortTodosByPriority()[index];
+                  return ListTile(
+                    leading: Checkbox(
+                      value: todo.completed,
+                      onChanged: (value) {
+                        setState(() {
+                          todo.completed = value ?? false;
+                          if (todo.completed) {
+                            _removeTodo(index);
+                          }
+                        });
+                      },
+                    ),
+                    title: Text(todo.title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold)),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(DateFormat('yyyy-MM-dd HH:mm:ss')
+                            .format(todo.time)),
+                        Text(_formatRemainingTime(todo.time)),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showAddTodoDialog,
+        child: const Icon(Icons.add),
+      ),
     );
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
   }
 }
