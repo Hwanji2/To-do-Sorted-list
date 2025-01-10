@@ -70,12 +70,14 @@ class _MyHomePageState extends State<MyHomePage> {
   String animatedText = "";
   String inputAnimatedText = "";
   String currentTime = "";
+  bool _notificationPermissionGranted = false;
   late Timer _timer;
 
   @override
   void initState() {
     super.initState();
     _initializeNotifications();
+    _checkNotificationPermission();
     _startTypingAnimation("할일 관리 앱에 오신 것을 환영합니다!");
     _startCurrentTimeUpdate();
     _startDeadlineCheck();
@@ -86,9 +88,34 @@ class _MyHomePageState extends State<MyHomePage> {
     tz_data.initializeTimeZones();
     const AndroidInitializationSettings androidSettings =
     AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initSettings =
-    InitializationSettings(android: androidSettings);
+
+    const InitializationSettings initSettings = InitializationSettings(
+      android: androidSettings,
+      iOS: DarwinInitializationSettings(),
+    );
     _notificationsPlugin.initialize(initSettings);
+  }
+
+  Future<void> _checkNotificationPermission() async {
+    final prefs = await SharedPreferences.getInstance();
+    bool? granted = prefs.getBool('notificationPermissionGranted');
+    if (granted == null || !granted) {
+      bool permissionGranted = await _requestNotificationPermission();
+      if (permissionGranted) {
+        await prefs.setBool('notificationPermissionGranted', true);
+        setState(() {
+          _notificationPermissionGranted = true;
+        });
+      }
+    } else {
+      setState(() {
+        _notificationPermissionGranted = true;
+      });
+    }
+  }
+
+  Future<bool> _requestNotificationPermission() async {
+    return true;
   }
 
   Future<void> _loadDataFromDB() async {
@@ -127,7 +154,8 @@ class _MyHomePageState extends State<MyHomePage> {
         if (!todo.completed) {
           final remaining = todo.time.difference(now);
           if (remaining.inSeconds == 30) {
-            _showNotification("기한 30초 전!", "${todo.title}: ${_formatRemainingTime(todo.time)} 남음");
+            _showNotification(
+                "기한 30초 전!", "${todo.title}: ${_formatRemainingTime(todo.time)} 남음");
           } else if (remaining.isNegative) {
             _showNotification("기한 만료!", "${todo.title}: 기한이 지났습니다");
           }
@@ -143,8 +171,26 @@ class _MyHomePageState extends State<MyHomePage> {
       importance: Importance.max,
       priority: Priority.high,
     );
-    var platformDetails = NotificationDetails(android: androidDetails);
+
+    var darwinDetails = const DarwinNotificationDetails(
+      presentAlert: true,
+      presentSound: true,
+      presentBadge: true,
+    );
+
+    var platformDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: darwinDetails,
+    );
+
     await _notificationsPlugin.show(0, title, body, platformDetails);
+  }
+
+  void _removeTodo(int index) {
+    setState(() {
+      _todoList.removeAt(index);
+      _saveDataToDB();
+    });
   }
 
   void _startTypingAnimation(String message) {
@@ -159,6 +205,136 @@ class _MyHomePageState extends State<MyHomePage> {
         timer.cancel();
       }
     });
+  }
+
+  void _startInputTypingAnimation(String message) {
+    int index = 0;
+    Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (index < message.length) {
+        setState(() {
+          inputAnimatedText += message[index];
+        });
+        index++;
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  List<String> _getPriorityList() {
+    List<Todo> sortedList = _sortTodosByPriority();
+    return sortedList.map((todo) => todo.title).toList();
+  }
+
+  List<Todo> _sortTodosByPriority() {
+    List<Todo> sortedList = List.from(_todoList);
+    sortedList.sort((a, b) {
+      if (a.title.contains(goal) && !b.title.contains(goal)) {
+        return -1;
+      } else if (!a.title.contains(goal) && b.title.contains(goal)) {
+        return 1;
+      } else {
+        return a.time.compareTo(b.time);
+      }
+    });
+    return sortedList;
+  }
+
+  String _formatRemainingTime(DateTime time) {
+    final now = DateTime.now();
+    final difference = time.difference(now);
+    if (difference.isNegative) {
+      return "기한이 지났습니다";
+    } else {
+      return "${difference.inDays}일 ${difference.inHours % 24}시간 ${difference.inMinutes % 60}분 ${difference.inSeconds % 60}초 남음";
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    List<String> priorityList = _getPriorityList();
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Row(
+              children: priorityList
+                  .map((title) => Row(
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const Icon(Icons.chevron_right),
+                ],
+              ))
+                  .toList(),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              currentTime,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              onChanged: (value) {
+                setState(() {
+                  goal = value;
+                });
+              },
+              decoration: const InputDecoration(
+                labelText: '목표 입력 (우선순위 정렬)',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: _todoList.isEmpty
+                  ? const Center(
+                child: Text(
+                  '추가된 할일이 없습니다.',
+                  style: TextStyle(fontSize: 18),
+                ),
+              )
+                  : ListView.builder(
+                itemCount: _sortTodosByPriority().length,
+                itemBuilder: (context, index) {
+                  final todo = _sortTodosByPriority()[index];
+                  return ListTile(
+                    leading: Checkbox(
+                      value: todo.completed,
+                      onChanged: (value) {
+                        setState(() {
+                          todo.completed = value ?? false;
+                          if (todo.completed) {
+                            _removeTodo(index);
+                          }
+                        });
+                      },
+                    ),
+                    title: Text(todo.title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold)),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(DateFormat('yyyy-MM-dd HH:mm:ss')
+                            .format(todo.time)),
+                        Text(_formatRemainingTime(todo.time)),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showAddTodoDialog,
+        child: const Icon(Icons.add),
+      ),
+    );
   }
 
   void _showAddTodoDialog() {
@@ -230,131 +406,6 @@ class _MyHomePageState extends State<MyHomePage> {
           ],
         );
       },
-    );
-  }
-
-  void _startInputTypingAnimation(String message) {
-    int index = 0;
-    Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      if (index < message.length) {
-        setState(() {
-          inputAnimatedText += message[index];
-        });
-        index++;
-      } else {
-        timer.cancel();
-      }
-    });
-  }
-
-  void _removeTodo(int index) {
-    setState(() {
-      _todoList.removeAt(index);
-      _saveDataToDB();
-    });
-  }
-
-  List<Todo> _sortTodosByPriority() {
-    List<Todo> sortedList = List.from(_todoList);
-    sortedList.sort((a, b) {
-      if (a.title.contains(goal) && !b.title.contains(goal)) {
-        return -1;
-      } else if (!a.title.contains(goal) && b.title.contains(goal)) {
-        return 1;
-      } else {
-        return a.time.compareTo(b.time);
-      }
-    });
-    return sortedList;
-  }
-
-  String _formatRemainingTime(DateTime time) {
-    final now = DateTime.now();
-    final difference = time.difference(now);
-    if (difference.isNegative) {
-      return "기한이 지났습니다";
-    } else {
-      return "${difference.inDays}일 ${difference.inHours % 24}시간 ${difference.inMinutes % 60}분 ${difference.inSeconds % 60}초 남음";
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Text(
-              currentTime,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              animatedText,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              onChanged: (value) {
-                setState(() {
-                  goal = value;
-                });
-              },
-              decoration: const InputDecoration(
-                labelText: '목표 입력 (우선순위 정렬)',
-              ),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: _todoList.isEmpty
-                  ? const Center(
-                child: Text(
-                  '추가된 할일이 없습니다.',
-                  style: TextStyle(fontSize: 18),
-                ),
-              )
-                  : ListView.builder(
-                itemCount: _sortTodosByPriority().length,
-                itemBuilder: (context, index) {
-                  final todo = _sortTodosByPriority()[index];
-                  return ListTile(
-                    leading: Checkbox(
-                      value: todo.completed,
-                      onChanged: (value) {
-                        setState(() {
-                          todo.completed = value ?? false;
-                          if (todo.completed) {
-                            _removeTodo(index);
-                          }
-                        });
-                      },
-                    ),
-                    title: Text(todo.title,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold)),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(DateFormat('yyyy-MM-dd HH:mm:ss')
-                            .format(todo.time)),
-                        Text(_formatRemainingTime(todo.time)),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddTodoDialog,
-        child: const Icon(Icons.add),
-      ),
     );
   }
 
