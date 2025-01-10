@@ -22,7 +22,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   String animatedBannerText = "";
-  final String fullBannerText = '할일 관리 앱 Isang made by Jihwan';
+  final String fullBannerText = '할일 관리 앱 made by Jihwan';
 
   @override
   void initState() {
@@ -59,17 +59,50 @@ class _MyAppState extends State<MyApp> {
       ],
       home: Scaffold(
         appBar: AppBar(
-          backgroundColor: Colors.black, // 검정색 배경
-          title: Text(
-            animatedBannerText,
-            style: const TextStyle(
-              color: Colors.white,     // 흰색 글씨
-              fontWeight: FontWeight.bold, // 굵은 글씨
-              fontSize: 20,            // 글씨 크기
-            ),
-          ),
+          backgroundColor: Colors.black,
+          title: _buildAnimatedBannerText(),
         ),
         body: const MyHomePage(title: '목표'),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedBannerText() {
+    final splitIndex = animatedBannerText.indexOf('made by');
+    if (splitIndex == -1) {
+      return Text(
+        animatedBannerText,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 20,
+        ),
+      );
+    }
+
+    final mainText = animatedBannerText.substring(0, splitIndex);
+    final subText = animatedBannerText.substring(splitIndex);
+
+    return RichText(
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: mainText,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+            ),
+          ),
+          TextSpan(
+            text: subText,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.normal,
+              fontSize: 20,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -258,15 +291,11 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _handleTodoCompletion(int index) {
-    final sortedList = _sortTodosByPriority();
-    final todo = sortedList[index];
-    final originalIndex = _todoList.indexOf(todo);
-
+    final todo = _todoList[index];
     final now = DateTime.now();
     final remainingTime = todo.time.difference(now);
-    int score = 10; // 기본 점수
+    int score = 10;
 
-    // 목표와 연관된 키워드가 있으면 추가 점수
     for (var goalItem in _goals) {
       if (todo.title.contains(goalItem)) {
         score += 20;
@@ -274,12 +303,11 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     }
 
-    // 시간 내에 완료했을 경우 추가 보너스 점수
     if (!remainingTime.isNegative) {
       score += 10;
     }
 
-    _removeTodoAt(originalIndex);
+    _removeTodoAt(index);
   }
 
   void _startTypingAnimation(String message) {
@@ -337,72 +365,72 @@ class _MyHomePageState extends State<MyHomePage> {
     taskTitleController.clear();
     inputAnimatedText = "";
     showDialog(
-        context: context,
-        builder: (context) {
-      _startInputTypingAnimation("할일 제목과 시간을 입력하세요");
-      return AlertDialog(
+      context: context,
+      builder: (context) {
+        _startInputTypingAnimation("할일 제목과 시간을 입력하세요");
+        return AlertDialog(
           title: Text(animatedText),
-    content: Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-    Text(inputAnimatedText),
-    const SizedBox(height: 8),
-    TextField(
-    controller: taskTitleController,
-    decoration: const InputDecoration(
-    hintText: '할일 제목 입력',
-    ),
-    ),
-    const SizedBox(height: 24),
-    ElevatedButton(
-    onPressed: () async {
-    DateTime? selectedDate = await showDatePicker(
-    context: context,
-    initialDate: DateTime.now(),
-    firstDate: DateTime(2000),
-    lastDate: DateTime(2100),
-    locale: const Locale("ko"),
-    );
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(inputAnimatedText),
+              const SizedBox(height: 8),
+              TextField(
+                controller: taskTitleController,
+                decoration: const InputDecoration(
+                  hintText: '할일 제목 입력',
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () async {
+                  DateTime? selectedDate = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                    locale: const Locale("ko"),
+                  );
 
-    if (selectedDate == null) return;
+                  if (selectedDate == null) return;
 
-    TimeOfDay? selectedTime = await showTimePicker(
-    context: context,
-    initialTime: TimeOfDay.now(),
-    );
+                  TimeOfDay? selectedTime = await showTimePicker(
+                    context: context,
+                    initialTime: TimeOfDay.now(),
+                  );
 
-    if (selectedTime == null) return;
+                  if (selectedTime == null) return;
 
-    final DateTime dateTime = DateTime(
-    selectedDate.year,
-    selectedDate.month,
-    selectedDate.day,
-    selectedTime.hour,
-    selectedTime.minute,
-    );
+                  final DateTime dateTime = DateTime(
+                    selectedDate.year,
+                    selectedDate.month,
+                    selectedDate.day,
+                    selectedTime.hour,
+                    selectedTime.minute,
+                  );
 
-    final newTodo = Todo(
-    title: taskTitleController.text, time: dateTime);
-    setState(() {
-    _todoList.add(newTodo);
-    _saveDataToDB();
-    });
-    Navigator.of(context).pop();
-    },
-    child: const Text('날짜와 시간 선택'),
-    ),
-    ],
-    ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: const Text('취소'),
+                  final newTodo = Todo(
+                      title: taskTitleController.text, time: dateTime);
+                  setState(() {
+                    _todoList.add(newTodo);
+                    _saveDataToDB();
+                  });
+                  Navigator.of(context).pop();
+                },
+                child: const Text('날짜와 시간 선택'),
+              ),
+            ],
           ),
-        ],
-      );
-        },
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('취소'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -468,7 +496,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _startInputTypingAnimation(String message) {
     int index = 0;
-    inputAnimatedText = ""; // Reset the animated text
+    inputAnimatedText = "";
     Timer.periodic(const Duration(milliseconds: 100), (timer) {
       if (index < message.length) {
         setState(() {
@@ -525,8 +553,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     ],
                   ),
                 );
-              })
-                  .toList(),
+              }).toList(),
             ),
           ),
         ),
@@ -550,7 +577,8 @@ class _MyHomePageState extends State<MyHomePage> {
             const SizedBox(height: 16),
             Text(
               currentTime,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              style:
+              const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             TextField(
