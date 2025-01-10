@@ -67,6 +67,7 @@ class _MyHomePageState extends State<MyHomePage> {
   String goal = "";
   final List<Todo> _todoList = [];
   final List<String> _goals = [];
+  final Map<String, int> _goalScores = {};
   final FlutterLocalNotificationsPlugin _notificationsPlugin =
   FlutterLocalNotificationsPlugin();
   String animatedText = "";
@@ -124,10 +125,17 @@ class _MyHomePageState extends State<MyHomePage> {
     final prefs = await SharedPreferences.getInstance();
     final todoData = prefs.getString('todoList');
     final goalData = prefs.getStringList('goals') ?? [];
+    final goalScoresData = prefs.getString('goalScores');
+
     setState(() {
       _goals.clear();
       _goals.addAll(goalData);
+      if (goalScoresData != null) {
+        _goalScores.clear();
+        _goalScores.addAll(Map<String, int>.from(jsonDecode(goalScoresData)));
+      }
     });
+
     if (todoData != null) {
       final List<dynamic> jsonData = jsonDecode(todoData);
       setState(() {
@@ -143,6 +151,7 @@ class _MyHomePageState extends State<MyHomePage> {
     jsonEncode(_todoList.map((todo) => todo.toJson()).toList());
     await prefs.setString('todoList', todoData);
     await prefs.setStringList('goals', _goals);
+    await prefs.setString('goalScores', jsonEncode(_goalScores));
   }
 
   void _startCurrentTimeUpdate() {
@@ -200,6 +209,35 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  void _increaseScore(String goal, int score) {
+    setState(() {
+      _goalScores[goal] = (_goalScores[goal] ?? 0) + score;
+    });
+    _saveDataToDB();
+  }
+
+  void _handleTodoCompletion(int index) {
+    final todo = _todoList[index];
+    final now = DateTime.now();
+    final remainingTime = todo.time.difference(now);
+    int score = 10; // 기본 점수
+
+    // 목표와 연관된 키워드가 있으면 추가 점수
+    for (var goalItem in _goals) {
+      if (todo.title.contains(goalItem)) {
+        score += 20;
+        _increaseScore(goalItem, score);
+      }
+    }
+
+    // 시간 내에 완료했을 경우 추가 보너스 점수
+    if (!remainingTime.isNegative) {
+      score += 10;
+    }
+
+    _removeTodoAt(index);
+  }
+
   void _startTypingAnimation(String message) {
     int index = 0;
     Timer.periodic(const Duration(milliseconds: 100), (timer) {
@@ -238,6 +276,7 @@ class _MyHomePageState extends State<MyHomePage> {
               onPressed: () {
                 setState(() {
                   _goals.add(goalController.text);
+                  _goalScores[goalController.text] = 0;
                   _saveDataToDB();
                 });
                 Navigator.of(context).pop();
@@ -263,13 +302,14 @@ class _MyHomePageState extends State<MyHomePage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(inputAnimatedText),
+              const SizedBox(height: 8), // 간격 추가
               TextField(
                 controller: taskTitleController,
                 decoration: const InputDecoration(
                   hintText: '할일 제목 입력',
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16), // 간격 추가
               ElevatedButton(
                 onPressed: () async {
                   DateTime? selectedDate = await showDatePicker(
@@ -431,7 +471,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         },
                       ),
                       ActionChip(
-                        label: Text(goalItem),
+                        label: Text("$goalItem: ${_goalScores[goalItem] ?? 0}점"),
                         onPressed: () {
                           setState(() {
                             goal = goalItem;
@@ -499,7 +539,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         setState(() {
                           todo.completed = value ?? false;
                           if (todo.completed) {
-                            _removeTodoAt(index);
+                            _handleTodoCompletion(index);
                           }
                         });
                       },
