@@ -13,13 +13,41 @@ void main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  String animatedBannerText = "";
+  final String fullBannerText = '할일 관리 앱 Isang made by Jihwan';
+
+  @override
+  void initState() {
+    super.initState();
+    _startBannerTypingAnimation();
+  }
+
+  void _startBannerTypingAnimation() {
+    int index = 0;
+    Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (index < fullBannerText.length) {
+        setState(() {
+          animatedBannerText += fullBannerText[index];
+        });
+        index++;
+      } else {
+        timer.cancel();
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Isang made by Jihwan',
+      title: '할일 관리 앱 Isang',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
@@ -29,7 +57,20 @@ class MyApp extends StatelessWidget {
         Locale('ko'),
         Locale('en'),
       ],
-      home: const MyHomePage(title: '할일 관리 앱'),
+      home: Scaffold(
+        appBar: AppBar(
+          backgroundColor: Colors.black, // 검정색 배경
+          title: Text(
+            animatedBannerText,
+            style: const TextStyle(
+              color: Colors.white,     // 흰색 글씨
+              fontWeight: FontWeight.bold, // 굵은 글씨
+              fontSize: 20,            // 글씨 크기
+            ),
+          ),
+        ),
+        body: const MyHomePage(title: '목표'),
+      ),
     );
   }
 }
@@ -81,7 +122,7 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
     _initializeNotifications();
     _checkNotificationPermission();
-    _startTypingAnimation("할일 관리 앱에 오신 것을 환영합니다!");
+    _startTypingAnimation("할일을 추가해보세요!");
     _startCurrentTimeUpdate();
     _startDeadlineCheck();
     _loadDataFromDB();
@@ -217,7 +258,10 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _handleTodoCompletion(int index) {
-    final todo = _todoList[index];
+    final sortedList = _sortTodosByPriority();
+    final todo = sortedList[index];
+    final originalIndex = _todoList.indexOf(todo);
+
     final now = DateTime.now();
     final remainingTime = todo.time.difference(now);
     int score = 10; // 기본 점수
@@ -235,7 +279,7 @@ class _MyHomePageState extends State<MyHomePage> {
       score += 10;
     }
 
-    _removeTodoAt(index);
+    _removeTodoAt(originalIndex);
   }
 
   void _startTypingAnimation(String message) {
@@ -293,72 +337,72 @@ class _MyHomePageState extends State<MyHomePage> {
     taskTitleController.clear();
     inputAnimatedText = "";
     showDialog(
-      context: context,
-      builder: (context) {
-        _startInputTypingAnimation("할일 제목과 시간을 입력하세요");
-        return AlertDialog(
+        context: context,
+        builder: (context) {
+      _startInputTypingAnimation("할일 제목과 시간을 입력하세요");
+      return AlertDialog(
           title: Text(animatedText),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(inputAnimatedText),
-              const SizedBox(height: 8), // 간격 추가
-              TextField(
-                controller: taskTitleController,
-                decoration: const InputDecoration(
-                  hintText: '할일 제목 입력',
-                ),
-              ),
-              const SizedBox(height: 16), // 간격 추가
-              ElevatedButton(
-                onPressed: () async {
-                  DateTime? selectedDate = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.now(),
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime(2100),
-                    locale: const Locale("ko"),
-                  );
+    content: Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+    Text(inputAnimatedText),
+    const SizedBox(height: 8),
+    TextField(
+    controller: taskTitleController,
+    decoration: const InputDecoration(
+    hintText: '할일 제목 입력',
+    ),
+    ),
+    const SizedBox(height: 24),
+    ElevatedButton(
+    onPressed: () async {
+    DateTime? selectedDate = await showDatePicker(
+    context: context,
+    initialDate: DateTime.now(),
+    firstDate: DateTime(2000),
+    lastDate: DateTime(2100),
+    locale: const Locale("ko"),
+    );
 
-                  if (selectedDate == null) return;
+    if (selectedDate == null) return;
 
-                  TimeOfDay? selectedTime = await showTimePicker(
-                    context: context,
-                    initialTime: TimeOfDay.now(),
-                  );
+    TimeOfDay? selectedTime = await showTimePicker(
+    context: context,
+    initialTime: TimeOfDay.now(),
+    );
 
-                  if (selectedTime == null) return;
+    if (selectedTime == null) return;
 
-                  final DateTime dateTime = DateTime(
-                    selectedDate.year,
-                    selectedDate.month,
-                    selectedDate.day,
-                    selectedTime.hour,
-                    selectedTime.minute,
-                  );
+    final DateTime dateTime = DateTime(
+    selectedDate.year,
+    selectedDate.month,
+    selectedDate.day,
+    selectedTime.hour,
+    selectedTime.minute,
+    );
 
-                  final newTodo = Todo(
-                      title: taskTitleController.text, time: dateTime);
-                  setState(() {
-                    _todoList.add(newTodo);
-                    _saveDataToDB();
-                  });
-                  Navigator.of(context).pop();
-                },
-                child: const Text('날짜와 시간 선택'),
-              ),
-            ],
+    final newTodo = Todo(
+    title: taskTitleController.text, time: dateTime);
+    setState(() {
+    _todoList.add(newTodo);
+    _saveDataToDB();
+    });
+    Navigator.of(context).pop();
+    },
+    child: const Text('날짜와 시간 선택'),
+    ),
+    ],
+    ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: const Text('취소'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('취소'),
-            ),
-          ],
-        );
-      },
+        ],
+      );
+        },
     );
   }
 
@@ -439,7 +483,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    List<String> priorityList = _getPriorityList();
+    List<Todo> sortedList = _sortTodosByPriority();
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title),
@@ -492,12 +536,12 @@ class _MyHomePageState extends State<MyHomePage> {
         child: Column(
           children: [
             Row(
-              children: priorityList
+              children: _getPriorityList()
                   .map((title) => Row(
                 children: [
                   Text(title,
-                      style:
-                      const TextStyle(fontWeight: FontWeight.bold)),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold)),
                   const Icon(Icons.chevron_right),
                 ],
               ))
@@ -529,9 +573,10 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               )
                   : ListView.builder(
-                itemCount: _sortTodosByPriority().length,
+                itemCount: sortedList.length,
                 itemBuilder: (context, index) {
-                  final todo = _sortTodosByPriority()[index];
+                  final todo = sortedList[index];
+                  final originalIndex = _todoList.indexOf(todo);
                   return ListTile(
                     leading: Checkbox(
                       value: todo.completed,
@@ -539,7 +584,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         setState(() {
                           todo.completed = value ?? false;
                           if (todo.completed) {
-                            _handleTodoCompletion(index);
+                            _handleTodoCompletion(originalIndex);
                           }
                         });
                       },
@@ -558,7 +603,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     trailing: IconButton(
                       icon: const Icon(Icons.close),
                       onPressed: () {
-                        _removeTodoAt(index);
+                        setState(() {
+                          _removeTodoAt(originalIndex);
+                        });
                       },
                     ),
                   );
