@@ -1,4 +1,5 @@
 # 할일 관리 앱 Isang
+https://youtu.be/5hS4xEygOMU?feature=shared
 
 ## 소개
 할일 관리 앱 Isang은 Flutter로 제작된 앱으로, 할일을 관리하고 목표를 설정하여 성취감을 느낄 수 있도록 도와줍니다. 사용자는 할일을 추가하고 목표와 관련된 할일에 우선순위를 부여할 수 있습니다.
