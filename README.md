@@ -1,4 +1,4 @@
-# 할일 관리 앱 Isang  
+# 할일 관리 앱 Isang 🪽
 📹 [YouTube 시연 영상](https://youtu.be/5hS4xEygOMU?feature=shared)  
 
 ## ✨ 소개  
